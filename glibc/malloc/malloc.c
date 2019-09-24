@@ -1464,8 +1464,8 @@ typedef struct malloc_chunk *mbinptr;
 #define NBINS             128
 #define NSMALLBINS         64
 #define SMALLBIN_WIDTH    MALLOC_ALIGNMENT
-#define SMALLBIN_CORRECTION (MALLOC_ALIGNMENT > 2 * SIZE_SZ)
-#define MIN_LARGE_SIZE    ((NSMALLBINS - SMALLBIN_CORRECTION) * SMALLBIN_WIDTH)
+#define SMALLBIN_CORRECTION (MALLOC_ALIGNMENT > 2 * SIZE_SZ) // false = 0
+#define MIN_LARGE_SIZE    ((NSMALLBINS - SMALLBIN_CORRECTION) * SMALLBIN_WIDTH) // ((64 - 0) * 2 * 8) = 1024 = 0x400
 
 #define in_smallbin_range(sz)  \
   ((unsigned long) (sz) < (unsigned long) MIN_LARGE_SIZE)
@@ -3492,27 +3492,28 @@ _int_malloc (mstate av, size_t bytes)
             }
 
           /* place chunk in bin */
+          // 把chunk放到bin里面
 
-          if (in_smallbin_range (size))
+          if (in_smallbin_range (size)) // 小于1024， small bin
             {
               victim_index = smallbin_index (size);
               bck = bin_at (av, victim_index);
               fwd = bck->fd;
             }
-          else
+          else // >= 1024, large bin
             {
               victim_index = largebin_index (size);
-              bck = bin_at (av, victim_index);
-              fwd = bck->fd;
+              bck = bin_at (av, victim_index); // av 是 arena, 查找arena->bins, bck是合适大小的large bin头， 参考https://sploitfun.wordpress.com/2015/02/10/understanding-glibc-malloc/中的图
+              fwd = bck->fd; // fwd是bin中第一个chunk
 
               /* maintain large bins in sorted order */
-              if (fwd != bck)
+              if (fwd != bck) // 当这个bin是空的时候，fwd==bck
                 {
                   /* Or with inuse bit to speed comparisons */
                   size |= PREV_INUSE;
                   /* if smaller than smallest, bypass loop below */
-                  assert ((bck->bk->size & NON_MAIN_ARENA) == 0);
-                  if ((unsigned long) (size) < (unsigned long) (bck->bk->size))
+                  assert ((bck->bk->size & NON_MAIN_ARENA) == 0); // bck->bk是双向链表的最后下面一个， 且这个链表是降序排列的，越往下越小
+                  if ((unsigned long) (size) < (unsigned long) (bck->bk->size)) // 如果小于最小的
                     {
                       fwd = bck;
                       bck = bck->bk;
@@ -3521,10 +3522,10 @@ _int_malloc (mstate av, size_t bytes)
                       victim->bk_nextsize = fwd->fd->bk_nextsize;
                       fwd->fd->bk_nextsize = victim->bk_nextsize->fd_nextsize = victim;
                     }
-                  else
+                  else // 大于等于最小的
                     {
-                      assert ((fwd->size & NON_MAIN_ARENA) == 0);
-                      while ((unsigned long) size < fwd->size)
+                      assert ((fwd->size & NON_MAIN_ARENA) == 0); // fwd是bin中第一个chunk， 也就是最大的那个
+                      while ((unsigned long) size < fwd->size) // 找到在这个排序列表中的合适位置，fwd是游标，一直找到fwd<=victim
                         {
                           fwd = fwd->fd_nextsize;
                           assert ((fwd->size & NON_MAIN_ARENA) == 0);
@@ -3532,15 +3533,15 @@ _int_malloc (mstate av, size_t bytes)
 
                       if ((unsigned long) size == (unsigned long) fwd->size)
                         /* Always insert in the second position.  */
-                        fwd = fwd->fd;
-                      else
+                        fwd = fwd->fd; //?? 怎么就一行
+                      else // size > fwd->size, 插到fwd前面
                         {
                           victim->fd_nextsize = fwd;
                           victim->bk_nextsize = fwd->bk_nextsize;
                           fwd->bk_nextsize = victim;
                           victim->bk_nextsize->fd_nextsize = victim;
                         }
-                      bck = fwd->bk;
+                      bck = fwd->bk; //前面都是操作fd_nextsize/bk_nextsize的，这一行加下面几行处理bk和fd
                     }
                 }
               else
@@ -3548,7 +3549,7 @@ _int_malloc (mstate av, size_t bytes)
             }
 
           mark_bin (av, victim_index);
-          victim->bk = bck;
+          victim->bk = bck; // ?? 这些都是啥
           victim->fd = fwd;
           fwd->bk = victim;
           bck->fd = victim;
